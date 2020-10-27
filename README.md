@@ -15,3 +15,4 @@ Due to memory constraints, the code is low on variables.
 The email does not do TLS or SSL so a suitable email server must be used.
 It has been tested on office 365 with a connector for the ip address of the device.
 
+The project uses an Uno with an sd/ethernet shield.
