@@ -215,7 +215,7 @@ byte SendEmailMessage(char MailFilename) {
   SdFile thefile;
   thefile.open(MailFilename, FILE_WRITE);
 
-  if(client.connect("leibhold-com-au.mail.protection.outlook.com",25) == 1) {
+  if(client.connect("<YOUR EMAIL SERVER>",25) == 1) {
     Serial.println(F("connected"));
   } else {
     Serial.println(F("connection failed"));
@@ -223,20 +223,20 @@ byte SendEmailMessage(char MailFilename) {
   }
  
   if(!eRcv()) return 0;
-  client.println(F("helo 101.187.245.21"));
+  client.println(F("helo <YOUR DEVICE EXPOSED IP ADDRESS>"));
   if(!eRcv()) return 0;
   
-  client.println(F("MAIL From: tech.support@leibhold.com.au"));
+  client.println(F("MAIL From: <YOUR FROM ADDRESS>"));
   if(!eRcv()) return 0;
   
-  client.println(F("RCPT To: ed.leibrick@leibhold.com.au"));
+  client.println(F("RCPT To: <YOUR TO ADDRESS>"));
   if(!eRcv()) return 0;
   
  client.println(F("DATA"));
    if(!eRcv()) return 0;
 
-   client.println(F("To: ed.leibrick@leibhold.com.au"));
-   client.println(F("From: tech.support@leibhold.com.au"));
+   client.println(F("To: <YOUR TO ADDRESS>"));
+   client.println(F("From: <YOUR FROM ADDRESS>"));
    client.print(F("Subject: ALERT Temperature Warning  "));
    client.print(F("MIME-Version: 1.0\r\n"));
    client.print(F("Content-Type: multipart/mixed; "));
