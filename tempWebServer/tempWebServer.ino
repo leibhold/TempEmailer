@@ -57,35 +57,24 @@ void setup() {
 
 }
 
-
-
-
-void loopa() {
-
-}
-
-
-
 void loop() {
-  Serial.print("Loop");
-
    // check for a reading no more than once a 10 seconds.
-   delay(1000);
-   if (millis() - lastReadingTime > Cycledelay) {
-       if (timeStatus() == 0)
+   delay(10000);
+   if (millis() - lastReadingTime > Cycledelay) {  // cycle delay is 10 minutes
+       if (timeStatus() == 0)                   // Check if ntp was good.
         {
         setSyncProvider(getNtpTime);
         }
-      time_t Todays=now();
-      time_t LastMonths = now()- 2592000UL ;
-      time_t Yesterdays =now()-  86400UL ;
+      time_t Todays=now();                      // todays
+      time_t LastMonths = now()- 2592000UL ;    // lastmonth - for log file cleanup - not used yet
+      time_t Yesterdays =now()-  86400UL ;      // yesterday
       Serial.println(" - Doing a reading");
-      // do a reading since its 60 odd seconds since we did it
+      // do a reading since its 10 minutes since we did it
       int chk = DHT.read11(DHT11_PIN);
       tempreading = DHT.temperature ;
       humidreading = DHT.humidity;
       lastReadingTime=millis() ;
-      if (tempreading < 0.00)
+      if (tempreading < 0.00)   // sometimes -999 if the units isnt awake
       {
         // Try another read
           int chk = DHT.read11(DHT11_PIN);
@@ -98,17 +87,17 @@ void loop() {
           }
         }
 
-      tempSD();
+      tempSD();     // write to the log file
       // Check the temp and set flags if hot and hot before
       if (tempreading > tempthresh)
          {
-          Serial.println("Over temp");
-         IsHot=true;
+          Serial.println("Over temp");   
+          IsHot=true;                     // logic for hot
           // have we seen hot before ?
 
           if (BeenHotBefore == false ) 
              {
-            // no - this is the first hot we have seen - set hotbefore asnd start the timer
+            // no - this is the first hot we have seen - set hotbefore logic  and set the limit for 1 hour
             LastHotTime=millis() + RepeatMessage;
             BeenHotBefore=true;
              }
@@ -175,13 +164,15 @@ void loop() {
   
 }
 
-
+// just so we have nice even feilds in the log file
 char * padzeros(int digits){
    byte r;
    r = sprintf(buf, "%02d", digits);
    return buf;
 }
 
+
+// returns either date or time
 char * Returntime( time_t herenow, boolean datetype)
 {
   
@@ -214,10 +205,7 @@ char * Returntime( time_t herenow, boolean datetype)
 }
 
 
-
-
-
-
+// Send an email message - hard coded to save variables
 byte SendEmailMessage(char MailFilename) {
    if (SD.begin(4)){
    }
