@@ -5,8 +5,16 @@
  * 
  * Note: there are some hard coded email entries required in the SendEmal section,
  * 
+ * Base 64 encoder
+ * more information about original please visite http://base64.sourceforge.net/
  * 
+ * Sneaky Pad zeros
+ * https://forum.arduino.cc/index.php?topic=371117.msg2559670#msg2559670
  * 
+ * BMP file create  - might be this source
+ * https://forum.arduino.cc/index.php?topic=112733.msg849962#msg849962
+ * 
+ * NTP - from the NTOP example
  * 
  * 
  * 
