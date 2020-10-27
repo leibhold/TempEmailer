@@ -1,3 +1,17 @@
+/*
+ * This is a combination of a lot of hard work by others in the community 
+ * If you recogise the code, let me know and I will attribute it to you.
+ * I am afraid the origin code has been lost in the mists of time and copypasta
+ * 
+ * Note: there are some hard coded email entries required in the SendEmal section,
+ * 
+ * 
+ * 
+ * 
+ * 
+ * 
+ * 
+ */
 #include <SdFat.h>
 #include <Ethernet.h>
 #include <EthernetUdp.h>
