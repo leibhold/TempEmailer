@@ -6,7 +6,7 @@ The readings are done every 10 minutes and logged to a daily file
 
 Each night, the log file and a small simple bmp graph file are emailed.
 If the temperature exceeds a limit, an email alert is generated. 
-This alert is repeated every hour if the temperature remains over limit.
+This alert is repeated every 1/2 hour if the temperature remains over limit.
 
 The graph is a simple BMP file.
 
@@ -21,12 +21,14 @@ Wireless could be used.
 
 At present,
 Sketch uses 26384 bytes (81%) of program storage space. Maximum is 32256 bytes.
-Global variables use 1413 bytes (68%) of dynamic memory, leaving 635 bytes for local variables. Maximum is 2048 bytes.
+Global variables use 1413 bytes (68%) of dynamic memory, leaving 635 bytes for local variables. 
+Maximum is 2048 bytes.
 
 Looking at ways to make the code and variables smaller - so maybe add features.
 
-This project is public and may be used as you feel fit.
+This project is public and may be used as you feel fit. 
+It would be nice to have my name included in your version, but I can live without it
 
-Any contributions will be acknowledged as fantastic.
+Any contributions will be acknowledged as fantastic and placed in the code contribution sections.
 
 
