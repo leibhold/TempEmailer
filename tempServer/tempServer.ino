@@ -6,7 +6,7 @@
  * Note: there are some hard coded email entries required in the SendEmal section,
  * 
  * Base 64 encoder
- * more information about original please visite http://base64.sourceforge.net/
+ * 
  * 
  * Sneaky Pad zeros
  * https://forum.arduino.cc/index.php?topic=371117.msg2559670#msg2559670
@@ -14,179 +14,254 @@
  * BMP file create  - might be this source
  * https://forum.arduino.cc/index.php?topic=112733.msg849962#msg849962
  * 
- * NTP - from the NTOP example
+ * NTP - from the example
  * 
  * 
  * 
  * 
  */
+
 #include <SdFat.h>
 #include <Ethernet.h>
 #include <EthernetUdp.h>
 #include <dht.h>
-#include <time.h>
 #include <TimeLib.h>
-#include "sdios.h"
-byte mac[] = {
-  0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED
-};
-static const char cb64[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-#define DHT11_PIN 5
-#define w 720
-#define  h 100
-#define  imgSize 72000;
-IPAddress ip(192, 168, 1, 231);
-dht DHT;
-const char timeServer[] = "time.nist.gov"; // time.nist.gov NTP server
-byte packetBuffer[48]; //buffer to hold incoming and outgoing packets
-EthernetClient client(80);
+#include <Base64.h>
+const byte ip[] = { 192, 168, 1, 231 };                                // change this for your network
+const byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };            // change this for your card
+// BMP header based on our file size atc
+const unsigned char bmpFileHeader[14] PROGMEM =  {'B','M', '"','M',0,0, 0,0, 0,0, 54,0,0,0};
+const unsigned char bmpInfoHeader[40] PROGMEM =  {40,0,0,0, 208,2,0,0, 100,0,0,0, 1,0, 24,0};
+
+long Cycledelay =1000;                                       // 600000= 10 - minutes
+const long RepeatMessage = 1800000;                                 // 1800000 = 30 minutes between nagging 
+const int  tempthresh = 30;   
+dht DHT;                                                            // sensor
+EthernetClient client;
 EthernetUDP Udp;
-time_t LastMonth;
-time_t YesterdayStamp;
-long Cycledelay = 10000;
-long RepeatMessage = 600000;
-long lastReadingTime = 0;
-int8_t tempreading = 0;
-int8_t humidreading = 0;
-boolean HaventSendMessage = true;
-boolean ItsANewDay = false;
-boolean BeenHotBefore = false;
-boolean IsHot=false;
-boolean BeenAnHour=false;
-int8_t Daycheckold;  
-char Thefilename[17]="11-11-1111.txt";    // default incase NTP doesnt work
-long LastHotTime = millis() * 100;
-int8_t tempthresh=27;
-char * buf = (char *) malloc (3);
-char DateTimeArray[11];
-SdFat SD;
-byte picturepoints [144];
+time_t  LastMonth;
+time_t  YesterdayStamp;
+byte    packetBuffer[48]; 
+long    lastReadingTime = 0;
+int  tempreading = 0;
+int  humidreading = 0;
+boolean HaventSendMessage = true;                                    // logic for not spamming
+boolean ItsANewDay = false;                                          // logic for yesterdays log file email
+boolean BeenHotBefore = false;                                       // logic for how many hot times
+boolean IsHot=false;                                                 // logic for is it hot now
+boolean BeenAnHour=false;                                            // logic for not spamming
+int     Daycheckold;                                                  // holder for day check today or yesterday
+time_t  Todays;
+char    Todayfilename[13]="11111111.txt";                               // default incase NTP doesnt work
+char    Yestderdayfilename[13]="10111111.txt";                         // default incase NTP doesnt work
+char    MailFilename[13];                                              // default incase NTP doesnt work
+long    LastHotTime = millis() * 100;
+char *  buf = (char *) malloc (3);                                    // buffer for date characters
+char    DateTimeArray[11];                     
+byte    picturepoints [144]; // points for 10 minute temp checks
+byte    picturepointsH [144]; // points for 10 minute humid checks
+int     chk;
+SdFat   SD;
+SdFile  thefile;
+
+
+const char SMTPserver[44] = "xxxxxxxx-com-au.mail.protection.outlook.com"; // change the size of this to match entry +1
+const char FromEmail[29]="tech.support@xxxxxxxx.com.au";    // change the size of this to match entry +1
+const char ToEmail[28]=  "ed.xxxxxxxx@xxxxxxxx.com.au";     // change the size of this to match entry +1
+const char bmpfile[11]=  "report.bmp";                      // change the size of this to match entry +1
 
 void setup() {
-  Ethernet.begin(mac, ip);
   Serial.begin(115200);
-  Daycheckold=day();
+  SD.begin(4);
+  Serial.println(F(" Setup Started  "));
+  Ethernet.begin(mac,ip);
   Udp.begin(8888);
-  delay(1000);
-  Serial.println(F("Started "));
-  lastReadingTime=millis() ;
-  setSyncProvider(getNtpTime);
-  setSyncInterval(600000); 
-  Daycheckold=day()-1;
-
-
+  lastReadingTime=millis() ;                           // last read time
+  setSyncInterval(60000);                              // time sync
+  setSyncProvider(Getthetime);                         // function to return epoc to timelib from NTP
+    if (timeStatus() == timeNotSet)
+    {
+      // Try Again
+      setSyncProvider(Getthetime); 
+    }
   
-
+  Daycheckold=day()-1;                                 // yesterday, every thing seems so far away
+  time_t Todays1=now();                                // today
+  strcpy(Todayfilename,ReturnDateTime(Todays1,false)); // file name create
+  strcat(Todayfilename,".txt");                        // add extension
+  chk = DHT.read11(6);                                 // read sensor from pin 6
+  tempreading = DHT.temperature ;
+  humidreading = DHT.humidity;
+  PrintLogic();
 }
 
 void loop() {
-   // check for a reading no more than once a 10 seconds.
-   delay(10000);
-   if (millis() - lastReadingTime > Cycledelay) {  // cycle delay is 10 minutes
-       if (timeStatus() == 0)                   // Check if ntp was good.
+ 
+  if (millis() - lastReadingTime > Cycledelay) {                // cycle delay is 10 minutes
+  Serial.print(F(" Reading to "));
+  Todays=now();                                                 // todays
+  time_t Yesterdays =now()-  86400UL ;                          // yesterday
+  strcpy(Todayfilename,ReturnDateTime(Todays,false));           // file name create
+  strcat(Todayfilename,".txt");                                 // add extension
+  strcpy(Yestderdayfilename,ReturnDateTime(Yesterdays,false));  // file name create
+  strcat(Yestderdayfilename,".txt");                            // add extension
+  Serial.println(Todayfilename);
+  chk = DHT.read11(6);                                          // read sensor from pin 6
+  tempreading = DHT.temperature ;
+  humidreading = DHT.humidity;
+  lastReadingTime=millis() ;                                     // set last read time
+  if (tempreading < 0.00)                                        // sometimes -999  
+    {
+    // Try another read
+    chk = DHT.read11(6);                                       // read sensor from pin 6
+    tempreading = DHT.temperature ;
+    humidreading = DHT.humidity;
+      if (tempreading < 0.00)
         {
-        setSyncProvider(getNtpTime);
+        tempreading = 0 ;
+        humidreading = 0;
         }
-      time_t Todays=now();                      // todays
-      time_t LastMonths = now()- 2592000UL ;    // lastmonth - for log file cleanup - not used yet
-      time_t Yesterdays =now()-  86400UL ;      // yesterday
-      Serial.println(" - Doing a reading");
-      // do a reading since its 10 minutes since we did it
-      int chk = DHT.read11(DHT11_PIN);
-      tempreading = DHT.temperature ;
-      humidreading = DHT.humidity;
-      lastReadingTime=millis() ;
-      if (tempreading < 0.00)   // sometimes -999 if the units isnt awake
+      }
+    tempSD();     // write to the log file
+    // Check the temp and set flags if hot and hot before
+PrintLogic();
+    if (tempreading > tempthresh)
       {
-        // Try another read
-          int chk = DHT.read11(DHT11_PIN);
-          tempreading = DHT.temperature ;
-          humidreading = DHT.humidity;
-          if (tempreading < 0.00)
+      
+      IsHot=true;                     // logic for hot
+PrintLogic();
+      
+      if (BeenHotBefore == false ) 
+        {
+        // no - this is the first hot we have seen - 
+        // set hot before logic  and set the limit for RepeatMessage time
+        LastHotTime=millis() + RepeatMessage;
+        BeenHotBefore=true;
+ PrintLogic();
+
+        
+        }
+        else
+        {
+        //yes we have but has it been an hour ?
+        if ( LastHotTime < millis())
           {
-             tempreading = 0 ;
-             humidreading = 0;
+          BeenAnHour=true;
+          // Been more than an hour since we last complained so reset send a message
+          HaventSendMessage=true;
+          LastHotTime=millis() + RepeatMessage;  
+PrintLogic();             
+          }
+          else
+          {
+          BeenAnHour=false;
+PrintLogic();             
           }
         }
+    }
+    else
+    {
+    IsHot=false;
+    BeenAnHour=false;
+    BeenHotBefore=false;
+PrintLogic();   
+    }
+    // here we check for a new day
+    if (Daycheckold == day())
+      {
+      // Nothing to see here - move along
+      ItsANewDay=false;
+PrintLogic();   
+      }
+      else
+      {
+      // its a new day so reset all the flags
+      HaventSendMessage=true; 
+      ItsANewDay=true;
+      BeenHotBefore=false;
+      Daycheckold=day();
+PrintLogic();   
+      Serial.println(F("Reset as new day or startup ") );
+      }
 
-      tempSD();     // write to the log file
-      // Check the temp and set flags if hot and hot before
-      if (tempreading > tempthresh)
-         {
-          Serial.println("Over temp");   
-          IsHot=true;                     // logic for hot
-          // have we seen hot before ?
-
-          if (BeenHotBefore == false ) 
-             {
-            // no - this is the first hot we have seen - set hotbefore logic  and set the limit for 1 hour
-            LastHotTime=millis() + RepeatMessage;
-            BeenHotBefore=true;
-             }
-         else
-             {
-             //yes we have but has it been an hour ?
-             if ( LastHotTime < millis())
-                {
-                    BeenAnHour=true;
-                  
-                 // Been more than an hour since we last complained so reset send a message
-                 HaventSendMessage=true;
-                 LastHotTime=millis() + RepeatMessage;               
-                 }
-                else
-                {
-                    BeenAnHour=false;
-                }
-             }
-         }
-         else
-         {
-          IsHot=false;
-          BeenAnHour=false;
-          BeenHotBefore=false;
-         }
-
-          // here we check for a new day
-          if (Daycheckold == day())
-            {
-            // Nothing to see here - move along
-            ItsANewDay=false;
+      if (HaventSendMessage)
+      {
+        if (ItsANewDay == true)
+          {
+          // send an email message for end of day
+          Serial.println(F("Doing Yesterdays ") );
+          strcpy(MailFilename,Yestderdayfilename);
+          BMPcreate();
+          strcpy(MailFilename,Yestderdayfilename);
+          Serial.println(F("Starting Email ") );
+          SendEmailMessage();
+          ItsANewDay=false;
+PrintLogic();           
+            }
+        }
+        
+        
+        if (IsHot)
+          {
+            strcpy(MailFilename,Todayfilename);
+            if (BeenHotBefore && BeenAnHour){
+              Serial.println(F("Doing Todays log again") );
+              SendEmailMessage();
+              HaventSendMessage=false;
+PrintLogic();   
+              
             }
             else
             {
-            // its a new day so reset all the flags
-            HaventSendMessage=true; 
-            ItsANewDay=true;
-            BeenHotBefore=false;
-            Daycheckold=day();
-            Serial.println(F(" a new day -") );
+             Serial.println(F("Doing Todays log as its hot") );
+             SendEmailMessage();
+             HaventSendMessage=false;
+PrintLogic();   
             }
-
-         if (HaventSendMessage)
-           {
+          }
+PrintLogic();
           
-             if (ItsANewDay == true)
-                {
-                 strcpy(Thefilename,Returntime(Yesterdays,false));
-                }
-                else
-                {
-                strcpy(Thefilename,Returntime(Todays,false));
-                }
-                strcat(Thefilename,".txt");
-                Serial.print(Thefilename);
-                Serial.println(F(" Send email message"));
-                SendEmailMessage(Thefilename);
-                
-                HaventSendMessage=false;
-             } // end of Have we sent a message loop
+  } // end of the timing loop
+  PrintLogic();
+  //Serial.print(F( "/"));
+  Cycledelay =600000;  // put the cycle backup to 10 minutes after initial startup
+  delay(60000);
+}
 
-  } // end of the timeing loop
+
+// Just a test
+void PrintLogic(){
+
+  Serial.print(F(" Hot:"));
+  Serial.print(IsHot);
+    Serial.print(F(" BeenAnHour:"));
+  Serial.print(BeenAnHour);
+
+    Serial.print(F(" BeenHotBefore:"));
+  Serial.print(BeenHotBefore);
+
+   Serial.print(F(" ItsANewDay:"));
+  Serial.print(ItsANewDay);
+
+   Serial.print(F(" Ram :"));
+  Serial.print(freeRam ());
+
+
+   Serial.print(F("\t Last Hot Time:"));
+  Serial.println(LastHotTime);
+ 
+  
   
 }
 
-// just so we have nice even feilds in the log file
+int freeRam () 
+{
+  extern int __heap_start, *__brkval; 
+  int v; 
+  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
+}
+
+// just so we have nice even fields in the log file
 char * padzeros(int digits){
    byte r;
    r = sprintf(buf, "%02d", digits);
@@ -195,129 +270,129 @@ char * padzeros(int digits){
 
 
 // returns either date or time
-char * Returntime( time_t herenow, boolean datetype)
-{
-  
+char * ReturnDateTime( time_t herenow, boolean datetype)
+  {  
   DateTimeArray[0] = '\0';
-
-  if (datetype == true ){
-
-     char * buf1 = padzeros(hour(herenow));
-     strcat(DateTimeArray, buf1);
-     strcat(DateTimeArray, ":");
-     buf1 = padzeros(minute(herenow));
-     strcat(DateTimeArray, buf1);
-     strcat(DateTimeArray, ":");
-     buf1 = padzeros(second(herenow));
-     strcat(DateTimeArray, buf1);
-    }
-  else
-    {
-     char * buf1 = padzeros(day(herenow));
-     strcat(DateTimeArray, buf1);
-     strcat(DateTimeArray, "-");
-     buf1 = padzeros(month(herenow));
-     strcat(DateTimeArray, buf1);
-     strcat(DateTimeArray, "-");
-     buf1 = padzeros(year(herenow));
-     strcat(DateTimeArray, buf1);
-
-     }
+    if (datetype == true ){
+      char * buf1 = padzeros(hour(herenow));
+      strcat(DateTimeArray, buf1);
+      strcat(DateTimeArray, ":");
+      buf1 = padzeros(minute(herenow));
+      strcat(DateTimeArray, buf1);
+      strcat(DateTimeArray, ":");
+      buf1 = padzeros(second(herenow));
+      strcat(DateTimeArray, buf1);
+      }
+      else
+      {
+      char * buf1 = padzeros(day(herenow));
+      strcat(DateTimeArray, buf1);
+      buf1 = padzeros(month(herenow));
+      strcat(DateTimeArray, buf1);
+      buf1 = padzeros(year(herenow));
+      strcat(DateTimeArray, buf1);
+      }
   return (DateTimeArray);
 }
 
 
 // Send an email message - hard coded to save variables
-byte SendEmailMessage(char MailFilename) {
-   if (SD.begin(4)){
-   }
+  void SendEmailMessage() {
+
+
+   Serial.print(MailFilename);
+   Serial.println(F(" <M--- ") );
+
+   
   byte thisByte = 0;
   byte respCode;
-  
-  SdFile thefile;
-  thefile.open(MailFilename, FILE_WRITE);
-
-  if(client.connect("<YOUR EMAIL SERVER>",25) == 1) {
+  if(client.connect(SMTPserver,25) == 1) {
     Serial.println(F("connected"));
   } else {
     Serial.println(F("connection failed"));
     return 0;
   }
- 
+  client.println(F("helo"));
   if(!eRcv()) return 0;
-  client.println(F("helo <YOUR DEVICE EXPOSED IP ADDRESS>"));
-  if(!eRcv()) return 0;
-  
-  client.println(F("MAIL From: <YOUR FROM ADDRESS>"));
-  if(!eRcv()) return 0;
-  
-  client.println(F("RCPT To: <YOUR TO ADDRESS>"));
-  if(!eRcv()) return 0;
-  
- client.println(F("DATA"));
-   if(!eRcv()) return 0;
 
-   client.println(F("To: <YOUR TO ADDRESS>"));
-   client.println(F("From: <YOUR FROM ADDRESS>"));
-   client.print(F("Subject: ALERT Temperature Warning  "));
-   client.print(F("MIME-Version: 1.0\r\n"));
-   client.print(F("Content-Type: multipart/mixed; "));
-   client.println(F("boundary=XXXXboundarytext\r\n"));
-   client.print(F("--XXXXboundarytext\r\n\r\n"));
-  
-  if (thefile.available()!=0) {
-
-
-   client.println(F("Reported over temperature at client site - log file included"));
-   client.println(F("--XXXXboundarytext"));
-   client.println(F("Content-Type: application/octet-stream;"));
-   client.print(F("Content-Disposition: attachment;"));
-   client.println(F("filename=report.txt;"));
-   client.print(F("Content-Transfer-Encoding: base64;\r\n\r\n"));
-  // encode();
- unsigned char in[3],out[4]; int i,len,blocksout=0;
- while (thefile.available()!=0) {
-   len=0; for (i=0;i<3;i++) { in[i]=(unsigned char) thefile.read(); if (thefile.available()!=0) len++; else in[i]=0; }
-   if (len) { encodeblock(in,out,len); for(i=0;i<4;i++) client.write(out[i]); blocksout++; }
-   if (blocksout>=19||thefile.available()==0) { if (blocksout) client.print("\r\n");  blocksout=0; }
- }
-
-
-   
-   client.println(F("--XXXXboundarytext--"));
-
-    client.println(F("And  here we are "));
+  client.print(F("MAIL From: "));
+  client.println(FromEmail);
+  client.print(F("RCPT To: "));
+  client.println(ToEmail);
+  client.println(F("DATA"));
+  client.print(F("To: "));
+  client.println(ToEmail);
+  client.print(F("From: "));
+  client.println(FromEmail);
+  client.print(F("Return-Path: <"));
+  client.print(FromEmail);
+  client.println(F(">"));
+  client.print(F("Subject: Office "));
+  if (IsHot) {
+  client.print(F("ALERT Temperature Warning  "));
+  client.print(tempreading);
   }
   else
   {
-    client.println(F("Reported over temperature at client site - "));
-    client.print(MailFilename);
-    client.println(F(" - log file not found "));
-    client.println(F("--XXXXboundarytext"));
+  client.print(F("Temperature Logs  "));
+  client.print(MailFilename);
   }
-  client.print(F("\r\n.\r\n\n"));
-  if(!eRcv()) return 0;
-  client.stop();
-  Serial.println(F("disconnected"));
-  thefile.close();
-  return 1;
+  
+   client.print(F("  \r\n"));
+   client.print(F("MIME-Version: 1.0\r\n"));
+   client.print(F("Content-Type: multipart/mixed; "));
+   client.println(F("boundary=XXXXboundarytext\r\n"));
+  
+   Email_Section(MailFilename);
+   Email_Section(bmpfile);
+  
+     client.println(F("--XXXXboundarytext--"));
+     //client.println(F("Reported over temperature at client site "));
+     client.print(F("\r\n.\r\n"));
+     if(!eRcv()) return 0;
+     client.stop();
+     Serial.println(F("disconnected"));
+     
+     return 1;
 }
 
-
-
-
+void Email_Section (char ThisFilename[13])
+{
+   thefile.open(ThisFilename, FILE_READ);
+   Serial.println(ThisFilename);
+   if (thefile.available()!=0) {
+   Serial.println(F(" available "));
+   client.println(F("--XXXXboundarytext"));
+   client.println(F("Content-Type: application/octet-stream;"));
+   client.print(F("Content-Disposition: attachment;"));
+   client.print(F("filename="));
+   client.print(ThisFilename);
+   client.println(F(";"));
+   client.print(F("Content-Transfer-Encoding: base64;\r\n\r\n"));
+   while (thefile.available()!=0) {
+     char encoded[1];
+     char Bringit[3];
+     thefile.read(Bringit,3);
+     base64_encode(encoded, Bringit, 3);
+     client.print(encoded);
+     }
+   client.print(F("\r\n")); 
+   thefile.close();
+   client.println(F("--XXXXboundarytext"));
+   }
+}
 byte eRcv()
 {
   byte respCode;
   byte thisByte;
-  int8_t loopCount = 0;
+  int loopCount = 0;
   while(!client.available()) {
     delay(1);
     loopCount++;
     // if nothing received for 10 seconds, timeout
     if(loopCount > 10000) {
       client.stop();
-      Serial.println(F("\r\nTimeout"));
+      Serial.println(F(" Timeout "));
       return 0;
     }
   }
@@ -332,196 +407,117 @@ byte eRcv()
   }
   return 1;
 }
-
-
 void tempSD (){
-  if (SD.begin(4))
-  {
-    SdFile file;
-    Serial.print(Thefilename);
-    time_t nowfile=now();
-    file.open(Thefilename, FILE_WRITE);
-    file.print (Returntime(nowfile,true));
-    file.print (",");
-    file.print (tempreading);
-    file.print ( ",");
-    file.println (humidreading);
-    file.close();
+    thefile.open(Todayfilename, FILE_WRITE);
+    thefile.print(ReturnDateTime(Todays,true));
+    thefile.print (F(","));
+    thefile.print (tempreading);
+    thefile.print (F(","));
+    thefile.println (humidreading);
+    thefile.close();
+}
+
+void BMPcreate(){
     
-  }
-}
-
-
-time_t getNtpTime()
-{
-  while (Udp.parsePacket() > 0) ; // discard any previously received packets
-  Serial.println("Transmit NTP Request");
-  sendNTPpacket(timeServer);
-  uint32_t beginWait = millis();
-  while (millis() - beginWait < 1500) {
-    int size = Udp.parsePacket();
-    if (size >= 48) {
-      Serial.println("Receive NTP Response");
-      Udp.read(packetBuffer, 48);  // read packet into the buffer
-      unsigned long secsSince1900;
-      // convert four bytes starting at location 40 to a long integer
-      secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
-      secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
-      secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
-      secsSince1900 |= (unsigned long)packetBuffer[43];
-      return secsSince1900 - 2208988800UL + 34200;
-       setSyncInterval(60000); 
-    }
-  }
-  Serial.println(F("No NTP Response :-("));
-   setSyncInterval(6); 
-  return 0; // return 0 if unable to get the time
-}
-
-
-
-void BMPcreate(char filename){
-Serial.print(F("File open\n"));
-
-SD.begin(4);
-  
-  SdFile filer;
-  if (filer.open(filename)) {
-    char val[16];
-    int i = 0;
-     while (filer.available()) {
-      filer.fgets(val, 16);
-       picturepoints[i]=(10*(val[9] - '0') + val[10] - '0');
-
-      i++;
+    Serial.print (F("BMP  "));
+    Serial.println (MailFilename);
+    if (thefile.open(MailFilename)) {
+      char val[16];
+      int  i = 0;
+      
+      while (thefile.available() )  {
+        thefile.fgets(val, 16);
+        picturepoints[i]=(10*(val[9] - '0') + val[10] - '0');
+        picturepointsH[i] = (10*(val[12] - '0') + val[13] - '0');
+        i++;
+        if ( i > 144 ) continue;
+        }
       }
-     }
-    filer.close();
+      
+      thefile.close();
 
-  if (SD.exists("test.bmp")) 
-     {
-      Serial.print(F("Delteing file\n"));
-         SD.remove("test.bmp");
+      if (SD.exists("report.bmp")) 
+      {
+        SD.remove("report.bmp");
       }
 
-  
-  Serial.print(F("File rem\n"));
-  int rowSize = 4 * ((3*w + 3)/4);      // how many bytes in the row (used to create padding)
-  int fileSize = 54 + h*rowSize;   
 
-  unsigned char bmpPad[rowSize - 3*w];
-  for (int i=0; i<sizeof(bmpPad); i++) {         // fill with 0s
-    bmpPad[i] = 0;
-  }
-  // create file headers (also taken from StackOverflow example)
-  unsigned char bmpFileHeader[14] = {            // file header (always starts with BM!)
-    'B','M', 0,0,0,0, 0,0, 0,0, 54,0,0,0   };
-  unsigned char bmpInfoHeader[40] = {            // info about the file (size, etc)
-    40,0,0,0, 0,0,0,0, 0,0,0,0, 1,0, 24,0   };
-
-  bmpFileHeader[ 2] = (unsigned char)(fileSize      );
-  bmpFileHeader[ 3] = (unsigned char)(fileSize >>  8);
-  bmpFileHeader[ 4] = (unsigned char)(fileSize >> 16);
-  bmpFileHeader[ 5] = (unsigned char)(fileSize >> 24);
-
-  bmpInfoHeader[ 4] = (unsigned char)(       w      );
-  bmpInfoHeader[ 5] = (unsigned char)(       w >>  8);
-  bmpInfoHeader[ 6] = (unsigned char)(       w >> 16);
-  bmpInfoHeader[ 7] = (unsigned char)(       w >> 24);
-  bmpInfoHeader[ 8] = (unsigned char)(       h      );
-  bmpInfoHeader[ 9] = (unsigned char)(       h >>  8);
-  bmpInfoHeader[10] = (unsigned char)(       h >> 16);
-  bmpInfoHeader[11] = (unsigned char)(       h >> 24);
-
-  // write the file headers (thanks forum!)
-  
-  
-  SdFile file;
-  file.open("test.bmp", FILE_WRITE);
-  Serial.print(F("Openning file\n"));
-  file.write(bmpFileHeader, sizeof(bmpFileHeader));    // write file header
-  file.write(bmpInfoHeader, sizeof(bmpInfoHeader));    // " info header
-
-Serial.print(F("HEaders writtenn"));
-
-  for (int y=0; y<h; y++) {
-    for (int x=0; x<w; x++) {
-      int colorValy = 255; 
-      int colorValg = 255; 
-      int colorValr= 255;
-      int fred=x / 10 ;
-     if (picturepoints[fred] == y)
-     {
-          if ( picturepoints[fred]<=tempthresh ){
-          
-          colorValy = 0;
-          colorValg = 230;
-          colorValr= 0; 
-          } 
-          else
+      thefile.open("report.bmp", FILE_WRITE);
+      Serial.println ("report.bmp");
+      for (int i=0; i<14; i++) {       
+      thefile.write(pgm_read_byte_near(bmpFileHeader + i));
+      }
+      for (int i=0; i<40; i++) {       
+      thefile.write(pgm_read_byte_near(bmpInfoHeader + i));
+      }
+       // Serial.println (F("BMP Headers end"));
+      for (int y=0; y<100; y++) {
+        for (int x=0; x<720; x++) {
+          int colorValy = 255; 
+          int colorValg = 255; 
+          int colorValr= 255;
+          int ZPoints=x / 10 ;
+          if (picturepoints[ZPoints]> y)
           {
-          colorValy = 0;
-          colorValg = 0;
-          colorValr= 230;         
+            if ( picturepoints[ZPoints]<=tempthresh ){
+              colorValy = 0;
+              colorValg = 230;
+              colorValr= 0; 
+              } 
+              else
+              {
+              colorValy = 0;
+              colorValg = 0;
+              colorValr= 230;         
+              }
           }
-     }
-     if ( (x < 2 ) || (x > w-2 ) || (y < 2 ) || (y > h-2 ) )
-     {
-       colorValy = 1;
-       colorValg = 1;
-       colorValr= 1;
-     }
-     int u = x;
-          if ( (u  % 30) == 0 )
-     {
-       colorValy = 1;
-       colorValg = 1;
-       colorValr= 1;
-     }
-     
-      file.write(colorValy);
-      file.write(colorValg);
-      file.write(colorValr);
+              if (picturepointsH[ZPoints] == y)
+              {
+              colorValy = 0;
+              colorValg = 0;
+              colorValr= 0; 
+              }
+          int  u = x & B11110;   // mod 30
+          if ( (x < 2 ) || (x > 718 ) || (y < 2 ) || (y > 98 ) || (u  == 0)  )
+          {
+           colorValy = 1;
+           colorValg = 1;
+           colorValr= 1;
+          }
+          thefile.write(colorValy);
+          thefile.write(colorValg);
+          thefile.write(colorValr);
+          }
+        }
+        thefile.close();
+Serial.println (F("BMP end"));
+}
+// just so we have time t
+time_t Getthetime(){
+    sendNTPpacket("pool.ntp.org");
+    delay(2000);
+    if (Udp.parsePacket()) {
+    Udp.read(packetBuffer, 48);
+    unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
+    unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
+    unsigned long secsSince1900 = highWord << 16 | lowWord;
+    unsigned long epoch = secsSince1900 - 2208988800UL + 34200UL;
+    return epoch;
     }
-    file.write(bmpPad, (4-(w*3)%4)%4);
-  }
-
-  Serial.println(F("File closed"));
-  file.close(); 
-
 }
 
-
-
+// send an NTP request to the time server at the given address
 void sendNTPpacket(const char * address) {
   memset(packetBuffer, 0, 48);
-  packetBuffer[0] = 0b11100011;   // LI, Version, Mode
-  packetBuffer[1] = 0;     // Stratum, or type of clock
-  packetBuffer[2] = 6;     // Polling Interval
-  packetBuffer[3] = 0xEC;  // Peer Clock Precision
+  packetBuffer[0] = 0b11100011;
+  packetBuffer[1] = 0;
+  packetBuffer[2] = 6;
+  packetBuffer[3] = 0xEC;  
   packetBuffer[12]  = 49;
   packetBuffer[13]  = 0x4E;
   packetBuffer[14]  = 49;
   packetBuffer[15]  = 52;
-  Udp.beginPacket(address, 123); // NTP requests are to port 123
+  Udp.beginPacket(address, 123); 
   Udp.write(packetBuffer, 48);
   Udp.endPacket();
 }
-
-void encodeblock(unsigned char in[3],unsigned char out[4],int len) {
- out[0]=cb64[in[0]>>2]; out[1]=cb64[((in[0]&0x03)<<4)|((in[1]&0xF0)>>4)];
- out[2]=(unsigned char) (len>1 ? cb64[((in[1]&0x0F)<<2)|((in[2]&0xC0)>>6)] : '=');
- out[3]=(unsigned char) (len>2 ? cb64[in[2]&0x3F] : '=');
-}
-
-/*
-void encode() {
- unsigned char in[3],out[4]; int i,len,blocksout=0;
- while (thefile.available()!=0) {
-   len=0; for (i=0;i<3;i++) { in[i]=(unsigned char) thefile.read(); if (thefile.available()!=0) len++; else in[i]=0; }
-   if (len) { encodeblock(in,out,len); for(i=0;i<4;i++) client.write(out[i]); blocksout++; }
-   if (blocksout>=19||thefile.available()==0) { if (blocksout) client.print("\r\n");  blocksout=0; }
- }
- 
-}
-*/
