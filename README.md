@@ -20,8 +20,8 @@ The project uses an Uno with an sd/ethernet shield and a standard temp humidity 
 Wireless could be used.
 
 At present,
-Sketch uses 26384 bytes (81%) of program storage space. Maximum is 32256 bytes.
-Global variables use 1413 bytes (68%) of dynamic memory, leaving 635 bytes for local variables. 
+Sketch uses (88%) of program storage space. Maximum is 32256 bytes.
+Global variables use  (83%) of dynamic memory.
 Maximum is 2048 bytes.
 
 Looking at ways to make the code and variables smaller - so maybe add features.
